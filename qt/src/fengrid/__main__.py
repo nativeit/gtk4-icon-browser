@@ -26,6 +26,7 @@ from fengrid.bridges.demo import Demo
 from fengrid.bridges.fonts import Fonts
 from fengrid.bridges.library import Library
 from fengrid.bridges.projects import Projects
+from fengrid.bridges.settings import Settings as SettingsBridge
 from fengrid.bridges.termcolors import TermColors
 from fengrid.bridges.theme import Theme
 from fengrid.bridges.taxonomy import Taxonomy
@@ -83,6 +84,12 @@ def main(argv=None) -> int:
     parser.add_argument("--term", action="store_true",
                         help="open the Colors pane on the Terminal designer"
                              " (QA screenshots)")
+    parser.add_argument("--palette", action="store_true",
+                        help="open the command palette shortly after load"
+                             " (QA screenshots)")
+    parser.add_argument("--settings", action="store_true",
+                        help="open the Settings screen shortly after load"
+                             " (QA screenshots)")
     parser.add_argument("--version", action="version",
                         version=f"fengrid {__version__}")
     args = parser.parse_args(argv)
@@ -135,6 +142,7 @@ def main(argv=None) -> int:
     term_bridge = TermColors(con)
     code_bridge = Code(con)
     projects_bridge = Projects(con)
+    settings_bridge = SettingsBridge(con)
     # demo suite: files under the data dir so removal never touches user folders
     demo_bridge = Demo(con, os.path.join(_user_data_dir(), "demo-assets"),
                        _asset_dir("fonts"))
@@ -152,6 +160,7 @@ def main(argv=None) -> int:
     ctx.setContextProperty("terms", term_bridge)
     ctx.setContextProperty("code", code_bridge)
     ctx.setContextProperty("projects", projects_bridge)
+    ctx.setContextProperty("settingsBridge", settings_bridge)
     ctx.setContextProperty("demo", demo_bridge)
     ctx.setContextProperty("updater", updater_bridge)
     taxonomy_bridge = Taxonomy(con)
@@ -163,6 +172,8 @@ def main(argv=None) -> int:
     ctx.setContextProperty("appVersion", __version__)
     ctx.setContextProperty("initialPane", args.pane)
     ctx.setContextProperty("initialTerm", args.term)
+    ctx.setContextProperty("initialPalette", args.palette)
+    ctx.setContextProperty("initialSettings", args.settings)
     engine.load(QUrl.fromLocalFile(os.path.join(_asset_dir("qml"), "Main.qml")))
     if not engine.rootObjects():
         print("error: failed to load the QML shell", file=sys.stderr)

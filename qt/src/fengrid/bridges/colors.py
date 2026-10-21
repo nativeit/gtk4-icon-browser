@@ -82,6 +82,11 @@ class Colors(QObject):
     def rule(self) -> str:
         return self._rule
 
+    @Slot(result="QVariantList")
+    def rule_names(self) -> list:
+        """Valid generation rules — the Settings screen's picker model."""
+        return list(core_colors.GENERATION_MODES)
+
     @Property("QVariantList", notify=palettesChanged)
     def palettes(self) -> list:
         return self._palettes

@@ -84,7 +84,11 @@ class _ScanWorker(QObject):
     def run(self):
         con = core_db.connect(self._db_path)
         try:
-            sources = indexer.ensure_sources(con, scanner.platform_candidates())
+            # merge the user-configured asset folders (first-run routine /
+            # Settings screen) into the platform candidate roots
+            folders = settings.get_asset_folders(con)
+            sources = indexer.ensure_sources(
+                con, scanner.platform_candidates(extra_dirs=folders))
             report = indexer.scan(
                 con, sources,
                 progress=lambda n, p: self.progress.emit(n))
@@ -294,6 +298,48 @@ class Library(QObject):
     def set_search(self, term: str) -> None:
         self._search = term or ""
         self._apply_filters()
+
+    # Cross-kind suggestion queries for the command palette (Alfred-style):
+    # one bounded LIKE per kind — icons+fonts live in `asset`, snippets in
+    # `snippet`, palettes in `palette`. Pane + icon describe where a pick
+    # routes to; the QML layer jumps via the owning pane bridge.
+    _SUGGESTS = (
+        ("icon", 0, "grid",
+         "SELECT id AS item_id, name AS label FROM asset"
+         " WHERE kind = 'icon' AND lower(name) LIKE ?"
+         " ORDER BY name LIMIT 6"),
+        ("font", 1, "type",
+         "SELECT MIN(id) AS item_id, family AS label FROM asset"
+         " WHERE kind = 'font' AND family IS NOT NULL AND lower(family) LIKE ?"
+         " GROUP BY family ORDER BY family LIMIT 6"),
+        ("palette", 2, "droplet",
+         "SELECT id AS item_id, name AS label FROM palette"
+         " WHERE lower(name) LIKE ? ORDER BY name LIMIT 6"),
+        ("snippet", 3, "code",
+         "SELECT id AS item_id, title AS label FROM snippet"
+         " WHERE lower(title) LIKE ? ORDER BY title LIMIT 6"),
+    )
+
+    @Slot(str, result="QVariantList")
+    def suggest(self, term: str) -> list:
+        """Up to 24 cross-kind asset matches for `term` (min 2 chars), as
+        {kind, pane, icon, label, item_id}. Cheap bounded LIKE over the four
+        kind tables — the palette calls it per keystroke."""
+        term = (term or "").strip()
+        if len(term) < 2:
+            return []
+        like = "%" + term.lower() + "%"
+        out = []
+        for kind, pane, icon, sql in self._SUGGESTS:
+            try:
+                rows = self._con.execute(sql, (like,)).fetchall()
+            except Exception:
+                continue  # table/column missing pre-migration: skip the kind
+            for r in rows:
+                out.append({"kind": kind, "pane": pane, "icon": icon,
+                            "label": str(r["label"] or ""),
+                            "item_id": int(r["item_id"])})
+        return out
 
     @Slot(str)
     def set_theme(self, name: str) -> None:

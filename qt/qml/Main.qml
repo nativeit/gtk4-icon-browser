@@ -19,6 +19,24 @@ ApplicationWindow {
     // 0 = icons, 1 = fonts, 2 = colors, 3 = code, 4 = projects (top-bar
     // pane switcher); --pane N (QA) overrides via the initialPane context
     property int pane: typeof initialPane !== "undefined" ? initialPane : 0
+    // settings overlay + first-run routine state
+    property bool showSettings: false
+    // command palette (Alt+` by default, user-configurable in settings)
+    property bool showPalette: false
+    property bool firstRunComplete: settingsBridge !== null
+                                    && settingsBridge.firstRunDone
+    // the configured command-bar hotkey as a QKeySequence string. The stored
+    // value is already canonical for the platform: on X11/Windows/macOS a
+    // plain Alt+` press reports as Key_QuoteLeft+Alt with no folded Shift, so
+    // a single binding matches reliably (unlike Alt+~, whose key needs Shift —
+    // see the probe notes in components/CommandPalette.qml).
+    readonly property string paletteSequence:
+        settingsBridge !== null ? settingsBridge.commandHotkey : "Alt+`"
+    // display form for placeholder tips — Qt's "Alt" IS Option on macOS
+    readonly property string paletteHotkeyLabel:
+        Qt.platform.os === "osx"
+        ? paletteSequence.replace(/Alt/g, "Option")
+        : paletteSequence
 
     header: Rectangle {
         height: 52
@@ -44,6 +62,14 @@ ApplicationWindow {
             anchors.leftMargin: 14
             anchors.rightMargin: 10
             spacing: 12
+
+            // main menu button — settings/preferences, rescan, about
+            IconButton {
+                id: mainMenuBtn
+                icon_name: "menu"
+                ToolTip.text: qsTr("Main menu")
+                onClicked: mainMenu.popup(mainMenuBtn.x, mainMenuBtn.y + height + 4)
+            }
 
             // glint-quad mini mark (branding/assets/fengrid-mark.svg shape)
             Item {
@@ -119,6 +145,8 @@ ApplicationWindow {
 
             Rectangle {
                 id: searchBox
+                // The command bar: live asset search inline, and it expands
+                // into the full command palette on click or the hotkey.
                 // flexible: fills the space the pane switcher leaves, so the
                 // right-side controls never clip at minimum window width
                 Layout.fillWidth: true
@@ -136,12 +164,38 @@ ApplicationWindow {
                     anchors.rightMargin: 8
                     spacing: 6
 
-                    IconImage { name: "search"; px: 15; tint: theme.tokens.textMuted }
+                    Rectangle {
+                        width: 22
+                        height: 22
+                        radius: 5
+                        color: barMa.containsMouse
+                               ? theme.tokens.border : "transparent"
+                        IconImage {
+                            anchors.centerIn: parent
+                            name: "search"
+                            px: 15
+                            tint: barMa.containsMouse ? theme.tokens.accent
+                                                      : theme.tokens.textMuted
+                        }
+                        MouseArea {
+                            id: barMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            ToolTip.text: qsTr("Open the command bar (%1)")
+                                          .arg(root.paletteHotkeyLabel)
+                            ToolTip.visible: containsMouse
+                            ToolTip.delay: 400
+                            onClicked: commandPalette.open(searchField.text)
+                        }
+                    }
 
                     TextField {
                         id: searchField
                         Layout.fillWidth: true
-                        placeholderText: qsTr("search assets  ( / )")
+                        // the tip surfaces the user's configured hotkey
+                        placeholderText: qsTr("Search or run a command  ( %1 )")
+                                         .arg(root.paletteHotkeyLabel)
                         color: theme.tokens.text
                         placeholderTextColor: theme.tokens.textMuted
                         background: null
@@ -149,6 +203,8 @@ ApplicationWindow {
                         font.family: theme.uiFont
                         font.pixelSize: 12
                         onTextChanged: searchDebounce.restart()
+                        // Enter expands into the palette with the seed term
+                        onAccepted: commandPalette.open(text)
                     }
 
                     IconImage {
@@ -391,6 +447,15 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+4"; onActivated: root.pane = 3 }
     Shortcut { sequence: "Ctrl+5"; onActivated: root.pane = 4 }
 
+    // command palette toggle — user-configurable, defaults to Alt+`
+    // (Option+` on macOS). Disabled during the first-run routine so the
+    // wizard can't be covered by an invisible overlay.
+    Shortcut {
+        sequence: root.paletteSequence
+        enabled: !(settingsBridge !== null && !settingsBridge.firstRunDone)
+        onActivated: commandPalette.toggle()
+    }
+
     // QA: --dialog <name> opens a registered modal after load — delayed so
     // the window is mapped first (a Popup opened pre-show never appears)
     function openQaModal(name) {
@@ -406,6 +471,18 @@ ApplicationWindow {
         interval: 400
         running: typeof qaOpenModal !== "undefined" && qaOpenModal !== ""
         onTriggered: openQaModal(qaOpenModal)
+    }
+
+    // QA: --palette / --settings open those overlays after the window maps
+    Timer {
+        interval: 400
+        running: typeof initialPalette !== "undefined" && initialPalette
+        onTriggered: commandPalette.open()
+    }
+    Timer {
+        interval: 400
+        running: typeof initialSettings !== "undefined" && initialSettings
+        onTriggered: root.showSettings = true
     }
 
     Toast { id: toast }
@@ -438,5 +515,70 @@ ApplicationWindow {
         function onMessage(msg) { toast.show(msg) }
         function onExportDone(path) { toast.show(qsTr("Exported to %1").arg(path)) }
         function onExportFailed(err) { toast.show(qsTr("Export failed: %1").arg(err)) }
+    }
+
+    // ------------------------------------------------------- main menu
+    Menu {
+        id: mainMenu
+        background: Rectangle {
+            color: theme.tokens.surface
+            border.color: theme.tokens.border
+            radius: 8
+        }
+        MenuItem {
+            text: qsTr("Settings / Preferences…")
+            height: 30
+            onTriggered: root.showSettings = true
+        }
+        MenuSeparator { }
+        MenuItem {
+            text: qsTr("Re-scan library")
+            height: 30
+            enabled: library !== null && !library.scanning
+            onTriggered: library.rescan()
+        }
+    }
+
+    // -------------------------------------------------- settings overlay
+    // VS Code-style full-screen settings; the workbench hides while open
+    SettingsScreen {
+        id: settingsOverlay
+        anchors.fill: parent
+        visible: root.showSettings
+        z: 400
+        onClosed: root.showSettings = false
+    }
+
+    // --------------------------------------------------- command palette
+    // expands from the command bar: VS Code command palette + Spotlight +
+    // Alfred-style live asset search, one overlay.
+    CommandPalette {
+        id: commandPalette
+        anchors.fill: parent
+        onPaneRequested: idx => root.pane = idx
+        onSettingsRequested: root.showSettings = true
+        onSearchRequested: term => searchField.text = term
+        // a picked suggestion: jump to its pane and surface the item there
+        onAssetRequested: function (kind, itemId, label) {
+            if (kind === "icon")
+                searchField.text = label
+            else if (kind === "font" && fonts !== null) {
+                fonts.set_filter(label)
+                fonts.select(label)
+            } else if (kind === "palette" && colors !== null)
+                colors.open_palette(itemId)
+            else if (kind === "snippet" && code !== null)
+                code.open_snippet(itemId)
+        }
+    }
+
+    // ---------------------------------------------------- first-run overlay
+    // one-time configuration routine: paths, theme, features — shown once
+    // on the very first launch, never again once marked done
+    FirstRunWizard {
+        anchors.fill: parent
+        visible: settingsBridge !== null && !settingsBridge.firstRunDone
+        z: 500
+        onFinished: root.firstRunComplete = true
     }
 }

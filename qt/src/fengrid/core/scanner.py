@@ -25,11 +25,14 @@ _SIZE_RE = re.compile(r"^(?P<w>\d+)(?:x(?P<h>\d+))?$")
 _SIZE_WORDS = {"scalable", "symbolic", "symbolic-links", "cursors"}
 
 
-def platform_candidates() -> list[Path]:
+def platform_candidates(extra_dirs: list[str] | None = None) -> list[Path]:
     """Existing icon-source candidate roots, nested ones folded into parents.
 
     Port of scan-icons.sh:59-77 (candidate roots) and its nesting fold
-    (scan-icons.sh:23-24).
+    (scan-icons.sh:23-24). `extra_dirs` are the user-configured asset
+    folders from the first-run routine / Settings screen; they participate
+    in the same nesting fold so a platform root inside a user folder
+    doesn't get scanned twice.
     """
     found: list[Path] = []
 
@@ -38,6 +41,8 @@ def platform_candidates() -> list[Path]:
         if p.is_dir():
             found.append(p)
 
+    for d in (extra_dirs or []):
+        add(d)
     add("/usr/share/icons")
     add("/usr/local/share/icons")
     add(Path.home() / ".icons")

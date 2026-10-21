@@ -2,4 +2,8 @@ singleton Icons 1.0 Icons.qml
 FormCheck 1.0 FormCheck.qml
 FormDialog 1.0 FormDialog.qml
 FormInput 1.0 FormInput.qml
+FirstRunWizard 1.0 FirstRunWizard.qml
+HotkeyField 1.0 HotkeyField.qml
+SettingsScreen 1.0 SettingsScreen.qml
 PropertiesPanel 1.0 PropertiesPanel.qml
+CommandPalette 1.0 CommandPalette.qml
